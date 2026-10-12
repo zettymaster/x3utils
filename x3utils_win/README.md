@@ -82,7 +82,7 @@ Useful signs that the driver side is probably okay:
 - OpenOCD starts instead of immediately failing to find an adapter;
 - option `1` gets as far as trying to connect to the target.
 
-## Launcher Menus (v1.8.1)
+## Launcher Menus (v1.8.2)
 
 The main menu is:
 
