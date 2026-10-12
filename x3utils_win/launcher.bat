@@ -279,32 +279,18 @@ echo %D%
 echo                    Advanced Actions
 echo %D%
 echo.
-echo   [1] Flash SHU Compatible (ZT3, G3, F3/F3Pro)
-echo   [2] Flash Only - No Backup
-echo   [3] Check Protection
-echo   [4] Unlock / Rescue - Mass Erase
-echo   [5] Back
+echo   [1] Flash Only - No Backup
+echo   [2] Check Protection
+echo   [3] Unlock / Rescue - Mass Erase
+echo   [4] Back
 echo.
-choice /c 12345 /n /m "> Press a key (1-5): "
+choice /c 1234 /n /m "> Press a key (1-4): "
 set "advanced_key=%errorlevel%"
 
-if %advanced_key% equ 1 goto :advanced_compat
-if %advanced_key% equ 2 goto :advanced_flash_only
-if %advanced_key% equ 3 goto :advanced_rdp_check
-if %advanced_key% equ 4 goto :advanced_rdp_rescue
-if %advanced_key% equ 5 goto :menu_loop
-goto :advanced_menu
-
-:advanced_compat
-echo.
-echo Launching Flash SHU compatible...
-echo.
-if exist "%~dp0special\flash_compat.bat" (
-    call "%~dp0special\flash_compat.bat"
-) else (
-    echo [%CL_R%FAIL%CL_NC%] Could not find special\flash_compat.bat.
-    pause
-)
+if %advanced_key% equ 1 goto :advanced_flash_only
+if %advanced_key% equ 2 goto :advanced_rdp_check
+if %advanced_key% equ 3 goto :advanced_rdp_rescue
+if %advanced_key% equ 4 goto :menu_loop
 goto :advanced_menu
 
 :advanced_flash_only

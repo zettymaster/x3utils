@@ -4,9 +4,6 @@ This page is only for Windows-specific usage: how to start the scripts, how to c
 
 For wiring, connection modes, C45, backups, and flashing safety, use the main README and wiki.
 
-> [!CAUTION]
-> **SHU compatibility firmware limits:** Do not use Flash SHU Compatible with F3/G3 VCU 1.6.3 or newer, or ZT3 VCU 1.5.9 or newer. GT3 is not supported by Flash SHU Compatible at any version (its own limit, VCU 1.7.2, is listed for reference only). SHU compat saves the original backup first, but using it on newer firmware may require restoring that backup.
-
 ## Start From Explorer
 
 1. Download and unzip x3utils.
@@ -82,7 +79,7 @@ Useful signs that the driver side is probably okay:
 - OpenOCD starts instead of immediately failing to find an adapter;
 - option `1` gets as far as trying to connect to the target.
 
-## Launcher Menus (v1.8.2)
+## Launcher Menus (v1.8.3)
 
 The main menu is:
 
@@ -112,11 +109,10 @@ Mode B also exposes `T` to change the guided countdown timeout.
 
 ### Advanced Menu
 
-1. Flash SHU Compatible
-2. Flash Only — No Backup
-3. Check Protection
-4. Unlock / Rescue — Mass Erase
-5. Back
+1. Flash Only — No Backup
+2. Check Protection
+3. Unlock / Rescue — Mass Erase
+4. Back
 
 Flash Only is deliberately dangerous because it skips the forced backup. It is
 also the correct recovery path after rescue has left a confirmed blank chip;
@@ -202,7 +198,6 @@ file. This uses the connection mode currently saved in `config.cmd`.
 ### Advanced Scripts Directly
 
 ```powershell
-.\special\flash_compat.bat
 .\special\flash_only.bat
 powershell -NoProfile -ExecutionPolicy Bypass -File .\special\rdp\rdp.ps1 -Check -Launcher
 powershell -NoProfile -ExecutionPolicy Bypass -File .\special\rdp\rdp.ps1 -Rescue -Launcher
@@ -224,9 +219,8 @@ The launcher saves the selected connection mode by editing:
 config.cmd
 ```
 
-If you run `connection_test.bat`, `dump.bat`, `flash.bat`, `flash_slot0.bat`, or
-`special\flash_compat.bat` directly, they use the last connection mode selected
-in the launcher.
+If you run `connection_test.bat`, `dump.bat`, `flash.bat`, or `flash_slot0.bat`
+directly, they use the last connection mode selected in the launcher.
 
 So if you are not sure:
 
@@ -276,7 +270,7 @@ Bundled OpenOCD for Windows.
 
 `special\`
 
-Advanced SHU Compatible, Flash Only, and protection/rescue scripts. Read
+Advanced Flash Only and protection/rescue scripts. Read
 `special\notes.txt` before using anything there.
 
 ## Common Windows Problems

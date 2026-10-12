@@ -6,9 +6,6 @@ Important expectation check: this is **not** a `.dmg` app and there is no drag-t
 
 If you only want the shortest path, follow the beginner steps below. If you already use Homebrew and Terminal, jump to the advanced quick start.
 
-> [!CAUTION]
-> **SHU compatibility firmware limits:** Do not use Flash SHU Compatible with F3/G3 VCU 1.6.3 or newer, or ZT3 VCU 1.5.9 or newer. GT3 is not supported by Flash SHU Compatible at any version (its own limit, VCU 1.7.2, is listed for reference only). SHU compat saves the original backup first, but using it on newer firmware may require restoring that backup.
-
 ## Beginner Path
 
 1. Install Homebrew from:
@@ -75,7 +72,7 @@ If Homebrew packages are already installed, `brew install` will usually skip or 
 - detects Apple Silicon (`arm64`) or Intel (`x86_64`);
 - selects the matching bundled xPack OpenOCD folder;
 - checks that Homebrew exists;
-- installs `hidapi`, `libusb`, and `python`;
+- installs `hidapi` and `libusb`;
 - runs `chmod +x` on scripts and OpenOCD;
 - tests that bundled OpenOCD can start.
 
@@ -123,7 +120,7 @@ If that works, follow the final PATH instructions printed by the Homebrew instal
 The installer runs:
 
 ```bash
-brew install hidapi libusb python
+brew install hidapi libusb
 ```
 
 ## Checking The ST-LINK On macOS
@@ -159,7 +156,7 @@ After installation:
 
 Run macOS scripts from Terminal. If something fails, keep the terminal open and copy the exact error text.
 
-## Launcher Menus (v1.8.2)
+## Launcher Menus (v1.8.3)
 
 The main menu is:
 
@@ -189,11 +186,10 @@ Mode B also exposes `T` to change the guided countdown timeout.
 
 ### Advanced Menu
 
-1. Flash SHU Compatible
-2. Flash Only — No Backup
-3. Check Protection
-4. Unlock / Rescue — Mass Erase
-5. Back
+1. Flash Only — No Backup
+2. Check Protection
+3. Unlock / Rescue — Mass Erase
+4. Back
 
 Flash Only is deliberately dangerous because it skips the forced backup. It is
 also the correct recovery path after rescue has left a confirmed blank chip;
@@ -260,14 +256,12 @@ file. This uses the connection mode currently saved in `config.sh`.
 ### Advanced Scripts Directly
 
 ```bash
-./special/flash_compat.sh
 ./special/flash_only.sh
 ./special/rdp/rdp_check.sh -l
 ./special/rdp/rescue_unlock.sh -l
 ```
 
-`flash_compat.sh` uses `python3` for its patch step. The flash scripts prompt
-for their own file. `-l` tells the RDP tools to honor
+The flash scripts prompt for their own file. `-l` tells the RDP tools to honor
 the launcher mode saved in `config.sh`; without `-l`, they use the standalone
 guided rescue connection. Rescue is destructive and still requires `UNLOCK`.
 
@@ -283,9 +277,8 @@ The launcher saves the selected connection mode by editing:
 config.sh
 ```
 
-If you run `connection_test.sh`, `dump.sh`, `flash.sh`, `flash_slot0.sh`, or
-`special/flash_compat.sh` directly, they use the last connection mode selected
-in the launcher.
+If you run `connection_test.sh`, `dump.sh`, `flash.sh`, or `flash_slot0.sh`
+directly, they use the last connection mode selected in the launcher.
 
 If you are not sure:
 
@@ -342,7 +335,7 @@ the macOS-specific upstream Artery target configs, including mode D's
 
 `special/`
 
-Advanced SHU Compatible, Flash Only, and protection/rescue scripts. Read
+Advanced Flash Only and protection/rescue scripts. Read
 `special/notes.txt` before using anything there.
 
 ## Common macOS Problems
@@ -418,14 +411,6 @@ If macOS shows a security warning, open `System Settings`, check `Privacy & Secu
 ST-LINK does not appear in USB devices
 
 Check cable, port, hub, and adapter. macOS cannot use an adapter that does not appear as a USB device.
-
-`python3: command not found`
-
-Run:
-
-```bash
-brew install python
-```
 
 `config.sh is not writable`
 

@@ -307,31 +307,15 @@ while true; do
                 echo "                   Advanced Actions"
                 echo "$D"
                 echo
-                echo "  [1] Flash SHU Compatible (ZT3, G3, F3/F3Pro)"
-                echo "  [2] Flash Only - No Backup"
-                echo "  [3] Check Protection"
-                echo "  [4] Unlock / Rescue - Mass Erase"
-                echo "  [5] Back"
+                echo "  [1] Flash Only - No Backup"
+                echo "  [2] Check Protection"
+                echo "  [3] Unlock / Rescue - Mass Erase"
+                echo "  [4] Back"
                 echo
                 read -rp "> Enter option: " advanced_choice
 
                 case "$advanced_choice" in
                     1)
-                        echo
-                        echo "Launching Flash SHU compatible (ZT3/G3/F3/F3Pro)..."
-                        echo
-                        if [[ -f "$SCRIPT_DIR/special/flash_compat.sh" ]]; then
-                            bash "$SCRIPT_DIR/special/flash_compat.sh"
-                            if [[ $? -ne 0 ]]; then
-                                echo -e "[${CL_R}FAIL${CL_NC}] Flash script reported an error!"
-                                read -rp "Press ENTER to continue..."
-                            fi
-                        else
-                            echo -e "[${CL_R}FAIL${CL_NC}] Could not find special/flash_compat.sh."
-                            read -rp "Press ENTER to continue..."
-                        fi
-                        ;;
-                    2)
                         echo
                         echo "Launching Flash Only..."
                         echo
@@ -345,7 +329,7 @@ while true; do
                             read -rp "Press ENTER to continue..."
                         fi
                         ;;
-                    3)
+                    2)
                         echo
                         echo "Launching Protection Check..."
                         echo
@@ -357,7 +341,7 @@ while true; do
                         echo
                         read -rp "Press ENTER to continue..."
                         ;;
-                    4)
+                    3)
                         echo
                         echo "Launching Unlock / Rescue..."
                         echo
@@ -369,13 +353,13 @@ while true; do
                         echo
                         read -rp "Press ENTER to continue..."
                         ;;
-                    5)
+                    4)
                         break
                         ;;
                     *)
                         echo
                         echo -e "[${CL_R}FAIL${CL_NC}] Invalid selection."
-                        echo "       Please choose 1-5."
+                        echo "       Please choose 1-4."
                         sleep 1
                         ;;
                 esac

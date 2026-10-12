@@ -128,7 +128,7 @@ echo
 echo "[INFO] Installing required dependencies..."
 echo
 
-brew install hidapi libusb python
+brew install hidapi libusb
 
 echo
 echo "[INFO] Setting executable permissions..."

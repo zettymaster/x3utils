@@ -1,7 +1,7 @@
 @echo off
 :: ==========================================================================
 :: race_grade.cmd - shared power-race attempt classifier (the lego brick).
-:: Called by dump.bat / flash.bat / flash_compat.bat after a MISSED attempt.
+:: Called by dump.bat / flash.bat / flash_slot0.bat after a MISSED attempt.
 :: Reads the just-captured attempt log (%race_last%) and prints ONE colored
 :: live symbol so the operator sees WHY it missed, not an anonymous dot.
 ::

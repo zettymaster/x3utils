@@ -4,9 +4,6 @@ This page is for Linux-specific setup and terminal usage.
 
 It assumes you are comfortable with a shell. Hardware wiring, connection modes, C45, and flashing safety are covered in the main README and wiki.
 
-> [!CAUTION]
-> **SHU compatibility firmware limits:** Do not use Flash SHU Compatible with F3/G3 VCU 1.6.3 or newer, or ZT3 VCU 1.5.9 or newer. GT3 is not supported by Flash SHU Compatible at any version (its own limit, VCU 1.7.2, is listed for reference only). SHU compat saves the original backup first, but using it on newer firmware may require restoring that backup.
-
 ## Quick Start
 
 From the repository root:
@@ -21,11 +18,10 @@ If `config.sh` is not writable, the launcher will try to fix it with `chmod u+w 
 
 ## Dependencies
 
-The bundled OpenOCD binary is included, but the system still needs USB/HID support and Python for the SHU-compatible patch path.
+The bundled OpenOCD binary is included, but the system still needs USB/HID support.
 
 Common packages:
 
-- `python3`
 - `usbutils`
 - `hidapi` / `libhidapi-hidraw0`
 - udev rules for ST-LINK access without root
@@ -34,19 +30,19 @@ Common packages:
 
 ```bash
 sudo apt update
-sudo apt install python3 usbutils libhidapi-hidraw0
+sudo apt install usbutils libhidapi-hidraw0
 ```
 
 ### Fedora
 
 ```bash
-sudo dnf install python3 usbutils hidapi
+sudo dnf install usbutils hidapi
 ```
 
 ### Arch / Manjaro
 
 ```bash
-sudo pacman -S python usbutils hidapi
+sudo pacman -S usbutils hidapi
 ```
 
 Package names can vary slightly by distro version. If `hidapi` is not found, search your distro packages for `hidapi` or `libhidapi`.
@@ -114,7 +110,7 @@ If scripts are not executable:
 chmod +x *.sh
 ```
 
-## Launcher Menus (v1.8.2)
+## Launcher Menus (v1.8.3)
 
 The main menu is:
 
@@ -144,11 +140,10 @@ Mode B also exposes `T` to change the guided countdown timeout.
 
 ### Advanced Menu
 
-1. Flash SHU Compatible
-2. Flash Only — No Backup
-3. Check Protection
-4. Unlock / Rescue — Mass Erase
-5. Back
+1. Flash Only — No Backup
+2. Check Protection
+3. Unlock / Rescue — Mass Erase
+4. Back
 
 Flash Only is deliberately dangerous because it skips the forced backup. It is
 also the correct recovery path after rescue has left a confirmed blank chip;
@@ -202,14 +197,12 @@ file. This uses the connection mode currently saved in `config.sh`.
 ### Advanced Scripts Directly
 
 ```bash
-./special/flash_compat.sh
 ./special/flash_only.sh
 ./special/rdp/rdp_check.sh -l
 ./special/rdp/rescue_unlock.sh -l
 ```
 
-`flash_compat.sh` uses `python3` for its patch step. The flash scripts prompt
-for their own file. `-l` tells the RDP tools to honor
+The flash scripts prompt for their own file. `-l` tells the RDP tools to honor
 the launcher mode saved in `config.sh`; without `-l`, they use the standalone
 guided rescue connection. Rescue is destructive and still requires `UNLOCK`.
 
@@ -225,9 +218,8 @@ The launcher saves the selected connection mode by editing:
 config.sh
 ```
 
-If you run `connection_test.sh`, `dump.sh`, `flash.sh`, `flash_slot0.sh`, or
-`special/flash_compat.sh` directly, they use the last connection mode selected
-in the launcher.
+If you run `connection_test.sh`, `dump.sh`, `flash.sh`, or `flash_slot0.sh`
+directly, they use the last connection mode selected in the launcher.
 
 If you are not sure:
 
@@ -277,7 +269,7 @@ Bundled OpenOCD for Linux.
 
 `special/`
 
-Advanced SHU Compatible, Flash Only, and protection/rescue scripts. Read
+Advanced Flash Only and protection/rescue scripts. Read
 `special/notes.txt` before using anything there.
 
 ## Common Linux Problems
@@ -301,10 +293,6 @@ chmod +x *.sh
 OpenOCD cannot access the ST-LINK
 
 Install/reload udev rules, reconnect the adapter, and verify it appears in `lsusb`.
-
-`python3: command not found`
-
-Install Python with your distro package manager.
 
 `config.sh is not writable`
 
