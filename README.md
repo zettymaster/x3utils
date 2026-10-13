@@ -54,7 +54,7 @@ This video shows the older CLI flow, not the current GUI. A GUI walkthrough is p
 
 ## CLI Scripts
 
-<img width="518" height="653" alt="x3utils CLI" src="docs/media/x3utils-cli.png" />
+<img width="518" height="653" alt="x3utils CLI" src="docs/media/x3utils-cli.jpg" />
 
 The original CLI scripts still work and cover the same operations as the GUI, for anyone who prefers the terminal.
 
