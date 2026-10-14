@@ -2038,6 +2038,7 @@ void main() {
     final backup = _identifiedImage();
     Uint8List? published;
     String? publishedName;
+    final files = <(AndroidStoreFolder, String?, String, Uint8List)>[];
     final controller = AppController(
       backend: SwdartBackend(
         sessionFactory: () => _FakeSession(bytes: backup),
@@ -2057,18 +2058,24 @@ void main() {
         publishedName = fileName;
         return '$androidBackupDirectoryLabel/$fileName';
       },
+      androidFilePublisher: (bytes, fileName, folder, {subfolder}) async {
+        files.add((folder, subfolder, fileName, Uint8List.fromList(bytes)));
+        return '${folder.channelName}/$fileName';
+      },
     );
     addTearDown(controller.dispose);
     await Future<void>.delayed(Duration.zero);
 
-    expect(controller.logToFile, isFalse);
-    expect(controller.secondCopy, isFalse);
+    expect(controller.logToFile, isTrue);
+    expect(controller.secondCopy, isTrue);
     expect(controller.isActionAvailable('dump'), isTrue);
+    expect(controller.isActionAvailable('file_info'), isTrue);
     expect(controller.isActionAvailable('flash_backup'), isFalse);
 
     controller.selectAction('dump');
     expect(controller.canStart, isTrue);
     await controller.start();
+    await Future<void>.delayed(Duration.zero); // the unawaited log publish
 
     expect(controller.stage, StageState.ok);
     expect(published, backup);
@@ -2078,7 +2085,90 @@ void main() {
       '$androidBackupDirectoryLabel/$publishedName',
     );
     expect(controller.resultMetadataPath, isNull);
-    expect(controller.resultNote, contains('no metadata sidecar'));
+    expect(controller.resultNote, isNull);
+
+    // Sidecar beside the backup, then the 2nd copy (.bin, then its .json),
+    // then the run log.
+    final sidecarName = p.setExtension(publishedName!, '.json');
+    expect(
+      files.map((f) => '${f.$1.channelName}/${f.$2 ?? ''}/${f.$3}').toList(),
+      [
+        'backup//$sidecarName',
+        'second_copy//$publishedName',
+        'second_copy//$sidecarName',
+        startsWith('logs/dump/dump_'),
+      ],
+    );
+    final sidecar =
+        jsonDecode(utf8.decode(files[0].$4)) as Map<String, Object?>;
+    expect(sidecar['backup'], publishedName);
+    expect(sidecar['dumpVerdict'], 'ok');
+    expect(files[1].$4, backup);
+    expect(files[2].$4, files[0].$4);
+    expect(files[3].$3, endsWith('.log'));
+    expect(utf8.decode(files[3].$4), contains('backup info →'));
+  });
+
+  test('Android 2nd copy and Save log stay off when switched off', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'defaultAutoRetry': 0,
+      'secondCopy': false,
+      'logToFile': false,
+    });
+    final files = <String>[];
+    final controller = AppController(
+      backend: SwdartBackend(
+        sessionFactory: () => _FakeSession(bytes: _identifiedImage()),
+      ),
+      androidMode: true,
+      androidBackupPublisher: (_, fileName) async =>
+          '$androidBackupDirectoryLabel/$fileName',
+      androidFilePublisher: (_, fileName, folder, {subfolder}) async {
+        files.add('${folder.channelName}/$fileName');
+        return fileName;
+      },
+    );
+    addTearDown(controller.dispose);
+    await Future<void>.delayed(Duration.zero);
+
+    controller.selectAction('dump');
+    await controller.start();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.stage, StageState.ok);
+    expect(files, [startsWith('backup/')]);
+  });
+
+  test('Android sidecar and 2nd copy failures never fail the backup', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'defaultAutoRetry': 0,
+    });
+    final controller = AppController(
+      backend: SwdartBackend(
+        sessionFactory: () => _FakeSession(bytes: _identifiedImage()),
+      ),
+      androidMode: true,
+      androidBackupPublisher: (_, fileName) async =>
+          '$androidBackupDirectoryLabel/$fileName',
+      androidFilePublisher: (_, _, _, {subfolder}) async =>
+          throw const AndroidBackupStoreException('storage full'),
+    );
+    addTearDown(controller.dispose);
+    await Future<void>.delayed(Duration.zero);
+
+    controller.selectAction('dump');
+    await controller.start();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.stage, StageState.ok);
+    expect(
+      controller.console,
+      containsAll([
+        '== backup info was not written: storage full ==',
+        '== 2nd copy FAILED: storage full ==',
+        '== could not save log: storage full ==',
+      ]),
+    );
   });
 
   test('Android full Backup + Flash publishes before programming', () async {
@@ -2098,6 +2188,10 @@ void main() {
         published = Uint8List.fromList(bytes);
         return '$androidBackupDirectoryLabel/$fileName';
       },
+      androidFilePublisher: (_, fileName, folder, {subfolder}) async {
+        events.add('${folder.channelName}:${p.extension(fileName)}');
+        return fileName;
+      },
     );
     addTearDown(controller.dispose);
     await Future<void>.delayed(Duration.zero);
@@ -2108,14 +2202,25 @@ void main() {
     controller.selectAction('flash_backup');
     expect(controller.selectFirmwareBytes('incoming.bin', incoming).ok, isTrue);
     await controller.start();
+    await Future<void>.delayed(Duration.zero);
 
     expect(controller.stage, StageState.ok);
-    expect(events, ['read', 'publish', 'program', 'reset']);
+    // Sidecar and 2nd copy are saved before anything is written.
+    expect(events, [
+      'read',
+      'publish',
+      'backup:.json',
+      'second_copy:.bin',
+      'second_copy:.json',
+      'program',
+      'reset',
+      'logs:.log',
+    ]);
     expect(published, backup);
     expect(session.programAddress, 0x08000000);
     expect(session.programBytes, incoming);
     expect(controller.resultPath, startsWith(androidBackupDirectoryLabel));
-    expect(controller.resultNote, contains('Android backup only'));
+    expect(controller.resultNote, isNull);
   });
 
   test('Android slot-0 Backup + Flash accepts a matching ZIP3.2', () async {
@@ -2259,6 +2364,7 @@ void main() {
       'defaultAutoRetry': 0,
     });
     final events = <String>[];
+    Map<String, Object?>? sidecar;
     final backup = _identifiedImage(banner: 'SCOOTER_MCU_0001');
     final incoming = _identifiedImage(banner: 'SCOOTER_MCU_0001')
       ..[0x2000] ^= 0x55;
@@ -2269,6 +2375,13 @@ void main() {
       androidBackupPublisher: (_, fileName) async {
         events.add('publish');
         return '$androidBackupDirectoryLabel/$fileName';
+      },
+      androidFilePublisher: (bytes, fileName, folder, {subfolder}) async {
+        if (folder == AndroidStoreFolder.backup) {
+          events.add('sidecar');
+          sidecar = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
+        }
+        return fileName;
       },
     );
     addTearDown(controller.dispose);
@@ -2284,8 +2397,12 @@ void main() {
     );
 
     expect(controller.stage, StageState.ok);
-    expect(events, ['read', 'publish', 'ask', 'program', 'reset']);
+    // The sidecar waits for the answer, and still lands before the write.
+    expect(events, ['read', 'publish', 'ask', 'sidecar', 'program', 'reset']);
     expect(session.programBytes, incoming);
+    expect(sidecar?['type'], 'MCU');
+    expect(sidecar?['model'], 'zt3');
+    expect(sidecar?['modelSource'], 'operatorDeclared');
   });
 
   test('Android MCU Backup + Flash cancel keeps the backup only', () async {

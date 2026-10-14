@@ -624,11 +624,14 @@ class Firmware {
     return p.join(home, '.x3utils_backup');
   }
 
+  /// `{action}_<ts>.log` — shared by desktop and the Android logs folder.
+  static String logFileName(String action) => '${action}_${_stamp()}.log';
+
   /// Write a per-run console log under `<root>/logs/{action}/`.
   /// Returns the path.
   static String writeLog(String action, String content) {
     final dir = _dir(p.join('logs', action));
-    final path = p.join(dir, '${action}_${_stamp()}.log');
+    final path = p.join(dir, logFileName(action));
     File(path).writeAsStringSync(content);
     return path;
   }

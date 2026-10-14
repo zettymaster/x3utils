@@ -109,6 +109,19 @@ void main() {
       expect(web.isActionAvailable('make_zip3'), isFalse);
       expect(web.isActionAvailable('check'), isTrue);
     });
+
+    test('Get file info is on the APK and /, not on /m', () {
+      final web = AppController(phoneMode: true, browserMode: true);
+      addTearDown(web.dispose);
+      final apk = AppController(androidMode: true);
+      addTearDown(apk.dispose);
+      final desktopWeb = AppController(browserMode: true, androidMode: false);
+      addTearDown(desktopWeb.dispose);
+
+      expect(web.isActionAvailable('file_info'), isFalse);
+      expect(apk.isActionAvailable('file_info'), isTrue);
+      expect(desktopWeb.isActionAvailable('file_info'), isTrue);
+    });
   });
 
   group('mobile web renders the phone tree', () {

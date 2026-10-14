@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:file_selector/file_selector.dart';
 import 'android_console.dart'; // swipe-to-console (Android)
 import 'app_controller.dart';
+import 'engine/android_backup_store.dart'
+    show androidLogsDirectoryLabel, androidSecondCopyDirectoryLabel;
 import 'engine/dump_metadata.dart';
 import 'engine/file_info.dart';
 import 'engine/info_row.dart';
@@ -69,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // machine and `lastConnect`, and nothing here touches a target — a PASS
     // connect verdict for a run that never connected would be a lie.
     if (a.id == 'file_info') {
-      if (c.browserMode) {
+      if (c.browserMode || c.androidMode) {
         final name = c.firmwarePath;
         final bytes = c.firmwareBytes;
         if (name != null && bytes != null) {
@@ -363,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       final picked = await openFile(acceptedTypeGroups: [group]);
       if (picked != null) {
-        if (c.browserMode) {
+        if (c.browserMode || c.androidMode) {
           c.setFirmwareRawBytes(picked.name, await picked.readAsBytes());
         } else {
           c.setFirmware(picked.path);
@@ -371,10 +373,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
-    // Desktop slot 0 has ONE picker for both kinds: a .zip goes through the
-    // package loader, a .bin through the normal slot validator. The phone keeps
-    // its separate .bin and .zip buttons.
-    final combined = c.isSlotAction && !c.phoneMode;
+    // Slot 0 has ONE picker for both kinds: a .zip goes through the package
+    // loader, a .bin through the normal slot validator.
+    final combined = c.isSlotAction;
     final group = XTypeGroup(
       label: combined ? 'firmware or zip3 package' : 'firmware',
       extensions: combined ? const ['bin', 'zip'] : const ['bin'],
@@ -934,17 +935,35 @@ class _HomeScreenState extends State<HomeScreen> {
                                 fontSize: 12,
                               ),
                             )
-                          else if (c.androidMode)
+                          else if (c.androidMode) ...[
                             const Text(
-                              'Backups are saved to '
-                              'Downloads/x3utils/backup. Android creates one '
-                              'validated .bin with no sidecar or second copy.',
+                              'Backups are saved to Downloads/x3utils/backup.',
                               style: TextStyle(
                                 color: AppColors.mut,
                                 fontSize: 12,
                               ),
-                            )
-                          else
+                            ),
+                            const SizedBox(height: 10),
+                            _AndroidStorageSwitch(
+                              label: 'Keep a 2nd copy',
+                              folder: androidSecondCopyDirectoryLabel,
+                              value: c.secondCopy,
+                              onChanged: (v) {
+                                c.setSecondCopy(v);
+                                setLocal(() {});
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            _AndroidStorageSwitch(
+                              label: 'Save log',
+                              folder: androidLogsDirectoryLabel,
+                              value: c.logToFile,
+                              onChanged: (_) {
+                                c.toggleLogToFile();
+                                setLocal(() {});
+                              },
+                            ),
+                          ] else
                             _BackupSettingsSection(c: c),
                           ..._advancedSettings(setLocal),
                         ],
@@ -1222,10 +1241,19 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
   bool _actionsOpen = false;
   bool _advancedActionsOpen = false;
 
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1400),
-  )..repeat();
+  // Created in initState, not lazily: the compact picker pages never build the
+  // bolt visual, and a lazy controller first touched in dispose() would be
+  // created against a deactivated element.
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+  }
 
   @override
   void dispose() {
@@ -1383,6 +1411,11 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
                 enabled: c.isActionAvailable('flash_backup'),
               ),
               const Divider(color: AppColors.line, height: 1),
+              // Hidden, not greyed, on /m: it is deliberately not offered there.
+              if (c.isActionAvailable('file_info')) ...[
+                _actionChoice(c, 'file_info', enabled: true),
+                const Divider(color: AppColors.line, height: 1),
+              ],
               _AndroidChoiceRow(
                 key: const ValueKey('android-actions-advanced'),
                 icon: Icons.tune_rounded,
@@ -1604,6 +1637,11 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
                       ? (roomyCompact ? 12.0 : 4.0)
                       : 24.0;
                   final titleGap = compact ? (roomyCompact ? 8.0 : 4.0) : 8.0;
+                  // Same compact picker pages as desktop layout C: scope under
+                  // the title, no bolt, one-row file card.
+                  final compactPicker =
+                      c.stage == StageState.idle &&
+                      (c.hasFlashScope || c.actionId == 'file_info');
                   return AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
                     margin: EdgeInsets.only(
@@ -1695,6 +1733,10 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
                                         color: AppColors.txt,
                                       ),
                                     ),
+                                    if (compactPicker && c.hasFlashScope) ...[
+                                      SizedBox(height: controlGap),
+                                      _FlashScopeControl(c: c),
+                                    ],
                                     // The idle sub-line is dropped on the two
                                     // firmware screens. The title already
                                     // names the action, the pinned Actions
@@ -1724,14 +1766,16 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
                                         ),
                                       ),
                                     ],
-                                    SizedBox(height: visualGap),
-                                    Center(
-                                      child: _Visual(
-                                        c: c,
-                                        accent: accent,
-                                        pulse: _pulse,
+                                    if (!compactPicker) ...[
+                                      SizedBox(height: visualGap),
+                                      Center(
+                                        child: _Visual(
+                                          c: c,
+                                          accent: accent,
+                                          pulse: _pulse,
+                                        ),
                                       ),
-                                    ),
+                                    ],
                                     if (c.stage == StageState.idle &&
                                         c.action.needsFirmware) ...[
                                       SizedBox(height: controlGap),
@@ -1743,6 +1787,7 @@ class _AndroidCheckPageState extends State<_AndroidCheckPage>
                                         onPick: widget.onPickFirmware,
                                         onPickZip: widget.onPickZip,
                                         phone: true,
+                                        compact: compactPicker,
                                       ),
                                     ],
                                     SizedBox(height: sectionGap),
@@ -5283,15 +5328,15 @@ class _FirmwareBar extends StatelessWidget {
   final Future<void> Function() onPickZip;
   final bool phone;
 
-  /// Desktop layout C: one row (file name + one picker) in a narrow card. The
-  /// scope control lives under the hero title instead.
+  /// Layout C (desktop and phone): one row (file name + one picker) in a
+  /// narrow card. The scope control lives under the hero title instead.
   final bool compact;
   @override
   Widget build(BuildContext context) {
     final path = c.firmwarePath;
     final name = path?.split(RegExp(r'[\\/]')).last;
     final has = name != null;
-    if (compact && !phone) return _compactBar(name);
+    if (compact) return _compactBar(name);
     // The two flash actions share the scoped two-line bar; every other firmware
     // action writes one fixed kind of file and keeps the single-line picker.
     // Retired flash_slot0 keeps the two-line bar (it needs the .zip button) but
@@ -5528,6 +5573,7 @@ class _FirmwareBar extends StatelessWidget {
                 fg: AppColors.txt,
                 border: AppColors.line2,
                 small: true,
+                phone: phone,
                 centerText: true,
               ),
             ),
@@ -5952,6 +5998,55 @@ class _ResizeHandle extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────── settings helpers
+
+/// Android storage switch: a label, a switch, and the fixed folder it writes.
+class _AndroidStorageSwitch extends StatelessWidget {
+  const _AndroidStorageSwitch({
+    required this.label,
+    required this.folder,
+    required this.value,
+    required this.onChanged,
+  });
+  final String label;
+  final String folder;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.txt,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Switch(
+              value: value,
+              activeThumbColor: AppColors.brand,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+        Text(
+          folder,
+          style: const TextStyle(
+            color: AppColors.mut,
+            fontSize: 12,
+            fontFamily: kMono,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _SettingRow extends StatelessWidget {
   const _SettingRow({required this.label, required this.child});

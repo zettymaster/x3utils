@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show utf8;
 import 'dart:ui' show Color;
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
@@ -118,6 +119,7 @@ class AppController extends ChangeNotifier {
     @visibleForTesting bool? androidMode,
     @visibleForTesting BackupDownloader? backupDownloader,
     @visibleForTesting AndroidBackupPublisher? androidBackupPublisher,
+    @visibleForTesting AndroidFilePublisher? androidFilePublisher,
     @visibleForTesting BackupSecondCopy? backupSecondCopy,
   }) : assert(
          backend == null || runner == null,
@@ -131,6 +133,7 @@ class AppController extends ChangeNotifier {
        _phoneMode = phoneMode ?? androidMode ?? (!kIsWeb && Platform.isAndroid),
        _backupDownloader = backupDownloader ?? downloadBackupBytes,
        _androidBackupPublisher = androidBackupPublisher ?? publishAndroidBackup,
+       _androidFilePublisher = androidFilePublisher ?? publishAndroidFile,
        _backupSecondCopy = backupSecondCopy ?? Firmware.secondCopy {
     if (backend != null) {
       _backend = backend;
@@ -216,6 +219,7 @@ class AppController extends ChangeNotifier {
   final bool _phoneMode;
   final BackupDownloader _backupDownloader;
   final AndroidBackupPublisher _androidBackupPublisher;
+  final AndroidFilePublisher _androidFilePublisher;
   final BackupSecondCopy _backupSecondCopy;
   DesktopBackendRouter? _desktopBackendRouter;
 
@@ -334,10 +338,9 @@ class AppController extends ChangeNotifier {
         : _prefs!.getString('x3utilsRoot');
     Firmware.setRoot(x3utilsRoot);
     backupPrefix = _prefs!.getString('backupPrefix') ?? '';
-    secondCopy =
-        !_browserMode &&
-        !_androidMode &&
-        (_prefs!.getBool('secondCopy') ?? true);
+    // Android keeps its 2nd copy in Documents/x3utils_2nd_copy (2.1.9); the
+    // browser has nowhere to put one.
+    secondCopy = !_browserMode && (_prefs!.getBool('secondCopy') ?? true);
     // NB `compatAskWhenUnidentified` (GUI v1.2.8 only) is never read again: an
     // unrecognised build now always asks the operator, so there is nothing left
     // for a stored preference to switch. The orphan key is inert.
@@ -400,11 +403,9 @@ class AppController extends ChangeNotifier {
     }
     // ON by default from 2.1.0 on desktop: a run the operator wants help with
     // should already have its transcript on disk. Turning it off writes false
-    // and keeps it off. Web/Android have nowhere to write and stay off.
-    logToFile =
-        !_browserMode &&
-        !_androidMode &&
-        (_prefs!.getBool('logToFile') ?? true);
+    // and keeps it off. Android publishes to Downloads/x3utils/logs (2.1.9);
+    // the browser has nowhere to write and stays off.
+    logToFile = !_browserMode && (_prefs!.getBool('logToFile') ?? true);
     // ON by default from 2.1.0 on DESKTOP. The loader failure that took weeks
     // to find was intermittent, so a field recurrence must arrive with its
     // register baseline and per-chunk log already in the transcript — which
@@ -918,8 +919,11 @@ class AppController extends ChangeNotifier {
           Firmware.validateUnpackedFilename(unpackOutputName).ok;
     }
     if (!_backendSupportsCurrentAction) return false;
+    // Offline actions never touch the probe, matching
+    // deviceProbeBlocksCurrentAction.
     if (deviceProbeControlAvailable &&
         actionId != 'make_zip3' &&
+        actionId != 'file_info' &&
         !deviceProbeReady) {
       return false;
     }
@@ -942,6 +946,7 @@ class AppController extends ChangeNotifier {
           'check',
           'dump',
           'flash_backup',
+          'file_info',
           'flash_only',
           'rdp_check',
         }.contains(id)) {
@@ -951,7 +956,9 @@ class AppController extends ChangeNotifier {
     // key, and those keep a single backup copy. Native desktop only.
     if (id == 'flash_compat' && (_browserMode || _androidMode)) return false;
     if (id == 'make_zip3') return !_browserMode;
-    if (id == 'file_info') return true;
+    // Phone web (/m) stays the minimal tier: anyone after more tools uses the
+    // desktop web at / or the APK. Android has it since 2.1.9.
+    if (id == 'file_info') return !(_phoneMode && _browserMode);
     if (id == 'rdp_rescue' && _browserMode) return false;
     if (id == 'rdp_rescue' && _backend == null) return !_androidMode;
     final capabilities = _backend?.capabilities;
@@ -2207,11 +2214,86 @@ class AppController extends ChangeNotifier {
 
   void _flushLog(String runAction) {
     if (_runLog.isEmpty) return;
+    if (_androidMode) {
+      unawaited(_publishAndroidLog(runAction, _runLog.join('\n')));
+      return;
+    }
     try {
       final path = Firmware.writeLog(runAction, _runLog.join('\n'));
       _log('== log saved → $path ==');
     } catch (e) {
       _log('== could not save log: $e ==');
+    }
+  }
+
+  Future<void> _publishAndroidLog(String action, String content) async {
+    try {
+      final path = await _androidFilePublisher(
+        Uint8List.fromList(utf8.encode(content)),
+        Firmware.logFileName(action),
+        AndroidStoreFolder.logs,
+        subfolder: action,
+      );
+      _log('== log saved → $path ==');
+    } catch (e) {
+      _log('== could not save log: $e ==');
+    }
+  }
+
+  /// Android's sidecar and 2nd copy, published once the backup itself is
+  /// saved. Best-effort, as on desktop: a failure is logged and never changes
+  /// the run's verdict. The sidecar is built in memory; Android cannot rewrite
+  /// a published file, so a declared MCU model goes in before the first write.
+  Future<void> _publishAndroidBackupExtras(
+    Uint8List dump,
+    String fileName, {
+    String? mcuModel,
+  }) async {
+    final sidecarName = DumpMetadata.sidecarPath(fileName);
+    Uint8List? sidecar;
+    try {
+      var metadata = DumpMetadata.inspect(dump, backupPath: fileName);
+      if (mcuModel != null && DumpMetadata.needsMcuModelDeclaration(metadata)) {
+        try {
+          metadata = DumpMetadata.withMcuModel(metadata, dump, mcuModel);
+        } catch (e) {
+          _log('== MCU model not written to the backup info: $e ==');
+        }
+      }
+      sidecar = Uint8List.fromList(utf8.encode(DumpMetadata.encode(metadata)));
+      final saved = await _androidFilePublisher(
+        sidecar,
+        sidecarName,
+        AndroidStoreFolder.backup,
+      );
+      _log('== backup info → $saved ==');
+    } catch (e) {
+      sidecar = null;
+      _log('== backup info was not written: $e ==');
+    }
+    if (!secondCopy) return;
+    try {
+      final copied = await _androidFilePublisher(
+        dump,
+        fileName,
+        AndroidStoreFolder.secondCopy,
+      );
+      _log('== 2nd copy → $copied ==');
+    } catch (e) {
+      _log('== 2nd copy FAILED: $e ==');
+      return;
+    }
+    // Only beside a copied image, exactly as desktop's _maybeSecondCopy.
+    if (sidecar == null) return;
+    try {
+      final copied = await _androidFilePublisher(
+        sidecar,
+        sidecarName,
+        AndroidStoreFolder.secondCopy,
+      );
+      _log('== 2nd copy → $copied ==');
+    } catch (e) {
+      _log('== 2nd copy of the backup info FAILED: $e ==');
     }
   }
 
@@ -3544,19 +3626,19 @@ class AppController extends ChangeNotifier {
   /// Backup + Flash onto an MCU target. The shared MCU banner names no model,
   /// so the operator declares it before anything is written. The answer is
   /// recorded — the log, and on desktop the pre-flash backup's sidecar — and
-  /// never compared with anything, because nothing can confirm it. False
-  /// means the operator cancelled.
-  Future<bool> _declareFlashTargetMcuModel({
+  /// never compared with anything, because nothing can confirm it. Returns the
+  /// declared model; null means the operator cancelled.
+  Future<String?> _declareFlashTargetMcuModel({
     String? dumpPath,
     String? metadataPath,
   }) async {
     final model = await _askMcuModel?.call(FileInfo.mcuModels);
     if (model == null) {
       _log('== no MCU model declared — flash cancelled ==');
-      return false;
+      return null;
     }
     _log('== operator declared MCU model: $model (not verifiable) ==');
-    if (dumpPath == null || metadataPath == null) return true;
+    if (dumpPath == null || metadataPath == null) return model;
     try {
       final metadata = DumpMetadata.readJson(metadataPath);
       if (DumpMetadata.needsMcuModelDeclaration(metadata)) {
@@ -3567,7 +3649,7 @@ class AppController extends ChangeNotifier {
     } catch (e) {
       _log('== MCU model not written to the backup info: $e ==');
     }
-    return true;
+    return model;
   }
 
   _BackupCopyResult _copyExtraBackup(String srcPath, Uint8List sourceBytes) {
@@ -3686,14 +3768,13 @@ class AppController extends ChangeNotifier {
       return;
     }
     _log('== validated OK → $savedPath ==');
+    await _publishAndroidBackupExtras(bytes, fileName);
     _setInstruction('Backup validated and saved to Downloads.');
     await _finishRealAfterHold(
       true,
       'Backed up and verified.',
       '',
       outputPath: savedPath,
-      outputNote:
-          'Android backup only — no metadata sidecar or second copy was created.',
     );
   }
 
@@ -4011,10 +4092,11 @@ class AppController extends ChangeNotifier {
       }
       if (tm.note != null) _log('== ${tm.note} ==');
       if (targetId.bannerType == 'MCU' &&
-          !await _declareFlashTargetMcuModel(
-            dumpPath: outPath,
-            metadataPath: backupMetadataPath,
-          )) {
+          await _declareFlashTargetMcuModel(
+                dumpPath: outPath,
+                metadataPath: backupMetadataPath,
+              ) ==
+              null) {
         await _finishRealAfterHold(
           false,
           '',
@@ -4220,8 +4302,9 @@ class AppController extends ChangeNotifier {
       }
 
       backupName = Firmware.dumpFileName(prefix: backupPrefix);
-      final backupNote = _androidMode
-          ? 'Android backup only — no metadata sidecar or second copy was created.'
+      final backupFileName = backupName;
+      final String? backupNote = _androidMode
+          ? null
           : 'Browser download only — no metadata sidecar or second copy was created.';
       String backupPath;
       try {
@@ -4275,6 +4358,12 @@ class AppController extends ChangeNotifier {
         final backupResultText = _androidMode
             ? 'The pre-flash backup was saved.'
             : 'The pre-flash backup download was started.';
+        if (_androidMode) {
+          await _publishAndroidBackupExtras(
+            Uint8List.fromList(dumpBytes),
+            backupFileName,
+          );
+        }
         await _finishRealAfterHold(
           false,
           '',
@@ -4287,8 +4376,19 @@ class AppController extends ChangeNotifier {
         return;
       }
       if (targetMatch.note != null) _log('== ${targetMatch.note} ==');
-      if (targetId.bannerType == 'MCU' &&
-          !await _declareFlashTargetMcuModel()) {
+      final mcuModel = targetId.bannerType == 'MCU'
+          ? await _declareFlashTargetMcuModel()
+          : null;
+      // Android's sidecar waits for the model answer (it cannot be rewritten
+      // later) and is still saved before anything is written.
+      if (_androidMode) {
+        await _publishAndroidBackupExtras(
+          Uint8List.fromList(dumpBytes),
+          backupFileName,
+          mcuModel: mcuModel,
+        );
+      }
+      if (targetId.bannerType == 'MCU' && mcuModel == null) {
         await _finishRealAfterHold(
           false,
           '',
@@ -4353,19 +4453,21 @@ class AppController extends ChangeNotifier {
         : _flashFailMessage(flashResult);
     if (backup) {
       final backupNote = _androidMode
-          ? 'Android backup only — no metadata sidecar or second copy was created.'
+          ? null
           : 'Browser download only — no metadata sidecar or second copy was created.';
       final backupResultText = _androidMode
           ? 'The pre-flash backup was saved.'
           : 'The pre-flash backup download was started.';
+      final notes = [
+        if (flashOk && serialNote != null) serialNote,
+        ?backupNote,
+      ];
       await _finishRealAfterHold(
         flashOk,
         'Flashed and verified. $backupResultText',
         '$failure $backupResultText',
         outputPath: backupName,
-        outputNote: flashOk && serialNote != null
-            ? '$serialNote $backupNote'
-            : backupNote,
+        outputNote: notes.isEmpty ? null : notes.join(' '),
       );
     } else {
       await _finishRealAfterHold(flashOk, action.okMsg, failure);

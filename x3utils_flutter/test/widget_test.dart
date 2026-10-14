@@ -163,7 +163,7 @@ class _GuidedBackend implements HardwareBackend {
   void cancel() => complete();
 }
 
-/// Desktop layout C on a scoped flash action: the scope control sits above a
+/// Layout C (desktop and phone) on a scoped flash action: the scope control sits above a
 /// narrow file card holding ONE centred picker, whose label follows the scope.
 Future<void> _expectCompactPicker(
   WidgetTester tester,
@@ -359,8 +359,16 @@ void main() {
     expect(find.byKey(const ValueKey('android-actions-menu')), findsOneWidget);
     expect(find.text('Backup'), findsOneWidget);
     expect(find.text('Backup + Flash'), findsOneWidget);
+    expect(find.text('Get file info'), findsOneWidget);
     expect(find.text('SHU compatible'), findsNothing);
     expect(find.text('Advanced'), findsOneWidget);
+    final fileInfoInk = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const ValueKey('android-action-file_info')),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(fileInfoInk.onTap, isNotNull);
 
     final backupInk = tester.widget<InkWell>(
       find.descendant(
@@ -404,7 +412,6 @@ void main() {
 
     expect(find.text('Flash Only'), findsOneWidget);
     expect(find.text('ZIP3 tools'), findsNothing);
-    expect(find.text('Get file info'), findsNothing);
     expect(find.text('Check protection'), findsOneWidget);
     expect(find.text('Unlock / rescue'), findsNothing);
     final flashOnlyInk = tester.widget<InkWell>(
@@ -790,59 +797,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'Android Backup + Flash stacks scope above equal firmware pickers',
-    (WidgetTester tester) async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(390, 844);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPhysicalSize);
-      final controller = AppController(androidMode: true);
-      addTearDown(controller.dispose);
+  testWidgets('Android Backup + Flash uses the desktop compact picker', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final controller = AppController(androidMode: true);
+    addTearDown(controller.dispose);
 
-      await tester.pumpWidget(
-        MaterialApp(home: HomeScreen(controller: controller)),
-      );
-      await tester.pump();
-      controller.selectAction('flash_backup');
-      await tester.pump();
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(controller: controller)),
+    );
+    await tester.pump();
+    controller.selectAction('flash_backup');
+    await tester.pump();
 
-      final scope = find.text('Full image');
-      final slotScope = find.text('Slot 0 only');
-      final chooseBin = find.text('Choose .bin');
-      final chooseZip = find.text('Choose .zip');
-      await tester.ensureVisible(chooseZip);
-      await tester.pump();
-
-      expect(controller.actionId, 'flash_backup');
-      expect(scope, findsOneWidget);
-      expect(slotScope, findsOneWidget);
-      expect(chooseBin, findsOneWidget);
-      expect(chooseZip, findsOneWidget);
-      expect(
-        tester.getBottomLeft(slotScope).dy,
-        lessThan(tester.getTopLeft(chooseBin).dy),
-      );
-      expect(
-        tester.getSize(find.byKey(const ValueKey('firmware-pick-bin'))).width,
-        closeTo(
-          tester.getSize(find.byKey(const ValueKey('firmware-pick-zip'))).width,
-          1,
-        ),
-      );
-
-      InkWell zipButton() => tester.widget<InkWell>(
-        find.ancestor(of: chooseZip, matching: find.byType(InkWell)).first,
-      );
-      expect(zipButton().onTap, isNull);
-      await tester.tap(slotScope);
-      await tester.pump();
-      expect(controller.flashScope, FlashScope.slot0);
-      expect(zipButton().onTap, isNotNull);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(controller.actionId, 'flash_backup');
+    expect(find.byKey(const ValueKey('android-idle-visual')), findsNothing);
+    await _expectCompactPicker(tester, controller);
+  });
 
   testWidgets('Android compact Backup + Flash keeps its CTA above Actions', (
     WidgetTester tester,
@@ -882,15 +858,10 @@ void main() {
       tester.getSize(find.byKey(const ValueKey('firmware-scope'))).height,
       48,
     );
-    expect(
-      tester.getSize(find.byKey(const ValueKey('android-idle-visual'))),
-      const Size(84, 84),
-    );
+    expect(find.byKey(const ValueKey('android-idle-visual')), findsNothing);
     expect(
       tester.getTopLeft(find.byKey(const ValueKey('android-firmware-bar'))).dy -
-          tester
-              .getBottomLeft(find.byKey(const ValueKey('android-idle-visual')))
-              .dy,
+          tester.getBottomLeft(find.byKey(const ValueKey('firmware-scope'))).dy,
       greaterThanOrEqualTo(6),
     );
     expect(
@@ -1249,6 +1220,27 @@ void main() {
     expect(controller.deviceProbeReady, isTrue);
     expect(find.text('Ready to start'), findsOneWidget);
     expect(find.text('Check connection'), findsWidgets);
+  });
+
+  testWidgets('Get file info starts with no ST-Link connected', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final controller = AppController(
+      backend: _UsbProbeBackend(
+        const HardwareDeviceStatus(HardwareDeviceState.disconnected),
+      ),
+      androidMode: true,
+    );
+    addTearDown(controller.dispose);
+    await tester.pump();
+
+    expect(controller.deviceProbeReady, isFalse);
+    expect(controller.canStart, isFalse, reason: 'Check needs the probe');
+
+    controller.selectAction('file_info');
+    controller.setFirmwareRawBytes('x3_rescue.bin', Uint8List(16));
+    expect(controller.canStart, isTrue);
   });
 
   testWidgets(

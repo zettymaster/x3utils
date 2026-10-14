@@ -124,6 +124,10 @@ class DumpMetadata {
     };
   }
 
+  /// The sidecar's on-disk text: two-space indented JSON, trailing newline.
+  static String encode(Map<String, Object?> metadata) =>
+      '${const JsonEncoder.withIndent('  ').convert(metadata)}\n';
+
   /// Creates a JSON sidecar without replacing any existing sidecar.
   ///
   /// The complete JSON is written to `.json.part` first, then renamed only
@@ -138,12 +142,9 @@ class DumpMetadata {
     }
 
     final temporary = File('$sidecar.part');
-    final encoded = const JsonEncoder.withIndent(
-      '  ',
-    ).convert(inspect(dump, backupPath: dumpPath));
     temporary.createSync(exclusive: true);
     temporary.writeAsStringSync(
-      '$encoded\n',
+      encode(inspect(dump, backupPath: dumpPath)),
       mode: FileMode.write,
       flush: true,
     );
@@ -170,17 +171,34 @@ class DumpMetadata {
     String declaredModel,
   ) {
     final metadata = readJson(sidecarPath);
-    final model = _knownMcuModel(declaredModel);
+    _knownMcuModel(declaredModel);
     if (metadata['backup'] != _basename(dumpPath)) {
       throw FormatException('Backup info does not belong to this backup file.');
     }
+    final updated = withMcuModel(
+      metadata,
+      File(dumpPath).readAsBytesSync(),
+      declaredModel,
+    );
+    _replaceSidecar(sidecarPath, updated);
+    return updated;
+  }
+
+  /// The in-memory half of [declareMcuModel]: the same checks and the same
+  /// field rewrite, on a metadata map and the backup bytes. Android uses it
+  /// before the sidecar is first published, since it cannot rewrite one.
+  static Map<String, Object?> withMcuModel(
+    Map<String, Object?> metadata,
+    List<int> dump,
+    String declaredModel,
+  ) {
+    final model = _knownMcuModel(declaredModel);
     if (metadata['type'] != 'MCU' || metadata['model'] != null) {
       throw const FormatException(
         'Only an MCU sidecar with no model can receive a model declaration.',
       );
     }
 
-    final dump = File(dumpPath).readAsBytesSync();
     if (dump.length != Firmware.expectedSize) {
       throw FormatException(
         'The backup is not a complete ${Firmware.expectedSize}-byte image.',
@@ -218,7 +236,6 @@ class DumpMetadata {
           updated[entry.key] = entry.value;
       }
     }
-    _replaceSidecar(sidecarPath, updated);
     return updated;
   }
 
