@@ -6,13 +6,12 @@
 ### Latest Downloads
 
 - **[GUI v2.1.7 BETA](https://github.com/ztakis/x3utils/releases/tag/gui-v2.1.7-beta)** — latest test build for Windows, Linux and macOS plus arm64 Android APK.
-- **[GUI v2.1.0](https://github.com/ztakis/x3utils/releases/tag/gui-v2.1.0)** — desktop app for Windows, Linux and macOS, plus an arm64 Android APK for sideloading.
 - **[CLI v1.8.2](https://github.com/ztakis/x3utils/releases/tag/v1.8.2)** — terminal scripts for Windows, Linux and macOS.
 
 ### Web App
 
-- **[x3utils-web v2.1.0](https://x3utils-web.pages.dev/)** — Chrome and Edge desktop browsers.
-- **[x3utils-phone v2.1.0](https://x3utils-web.pages.dev/m/)** — Android phones using Chrome; a subset of the desktop tools with the Android layout.
+- **[x3utils-web v2.1.9](https://x3utils-web.pages.dev/)** — Chrome and Edge desktop browsers.
+- **[x3utils-phone v2.1.9](https://x3utils-web.pages.dev/m/)** — Android phones using Chrome; a subset of the desktop tools with the Android layout.
 
 WebUSB requires Chrome or Edge. Firefox and Safari are unsupported, and no iPhone or iPad browser will work.
 > [!CAUTION]
