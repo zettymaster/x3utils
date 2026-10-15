@@ -1,8 +1,10 @@
 // Derived from swdart, MIT licensed. See third_party/swdart/LICENSE.
-// Native USB transport for a future desktop swdart backend. It is compiled but
-// not selected by AppController while desktop continues to use OpenOCD.
+// Native libusb transport for the desktop swdart backend. libusb runs in a
+// worker isolate; see [_UsbWorker].
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -139,25 +141,17 @@ class _Libusb {
   }
 }
 
-class _NativeUsbTransport implements UsbTransport {
-  _NativeUsbTransport(this._library, this._context, this._handle, this._pid);
+/// One open ST-Link inside the worker isolate. Every libusb call is
+/// synchronous FFI, so it only ever runs there.
+class _WorkerDevice {
+  _WorkerDevice(this._library, this._context, this._handle, this.pid);
 
   final _Libusb _library;
   final Pointer<Void> _context;
   final Pointer<Void> _handle;
-  final int _pid;
+  final int pid;
 
-  @override
-  int get productId => _pid;
-
-  @override
-  String get productName =>
-      isV3 ? 'STLINK-V3' : (_pid == 0x3748 ? 'ST-Link/V2' : 'ST-Link/V2-1');
-
-  @override
-  bool get isV3 => v3Pids.contains(_pid);
-
-  Future<void> _bulkOut(int endpoint, Uint8List data) async {
+  void _bulkOut(int endpoint, Uint8List data) {
     final buffer = malloc<Uint8>(data.length);
     final transferred = malloc<Int32>();
     try {
@@ -179,7 +173,7 @@ class _NativeUsbTransport implements UsbTransport {
     }
   }
 
-  Future<Uint8List> _bulkIn(int endpoint, int length) async {
+  Uint8List _bulkIn(int endpoint, int length) {
     final buffer = malloc<Uint8>(length);
     final transferred = malloc<Int32>();
     try {
@@ -201,25 +195,15 @@ class _NativeUsbTransport implements UsbTransport {
     }
   }
 
-  int get _endpointOut => _outEndpoint(_pid);
-
-  @override
-  Future<Uint8List> xfer(
-    List<int> command, {
-    int rxLen = 0,
-    Uint8List? data,
-  }) async {
-    final packet = Uint8List(16)..setRange(0, command.length, command);
-    await _bulkOut(_endpointOut, packet);
-    if (data != null && data.isNotEmpty) {
-      await _bulkOut(_endpointOut, data);
-    }
+  Uint8List xfer(Uint8List packet, Uint8List? data, int rxLen) {
+    final endpointOut = _outEndpoint(pid);
+    _bulkOut(endpointOut, packet);
+    if (data != null && data.isNotEmpty) _bulkOut(endpointOut, data);
     if (rxLen > 0) return _bulkIn(_epIn, rxLen);
     return Uint8List(0);
   }
 
-  @override
-  Future<void> close() async {
+  void close() {
     try {
       _library.release(_handle, _interface);
     } catch (_) {}
@@ -228,8 +212,7 @@ class _NativeUsbTransport implements UsbTransport {
   }
 }
 
-Future<UsbTransport?> _open() async {
-  final library = _Libusb.open();
+_WorkerDevice? _workerOpen(_Libusb library) {
   final contextPointer = malloc<Pointer<Void>>();
   try {
     if (library.init(contextPointer) != 0) {
@@ -250,13 +233,160 @@ Future<UsbTransport?> _open() async {
           'libusb_claim_interface failed: $result (WinUSB driver bound?)',
         );
       }
-      return _NativeUsbTransport(library, context, handle, pid);
+      return _WorkerDevice(library, context, handle, pid);
     }
     library.exit(context);
     return null;
   } finally {
     malloc.free(contextPointer);
   }
+}
+
+/// Worker isolate entry. Requests are `[id, op, ...args]` and are handled one
+/// at a time, in order; each reply is `[id, error-or-null, result]`.
+///
+/// A handle closed by one request (for example Cancel's disconnect) makes any
+/// later request on it fail cleanly instead of touching freed libusb memory.
+void _workerMain(SendPort toMain) {
+  final requests = ReceivePort();
+  toMain.send(requests.sendPort);
+  _Libusb? library;
+  final devices = <int, _WorkerDevice>{};
+  var nextHandle = 1;
+  requests.listen((message) {
+    final request = message as List<Object?>;
+    final id = request[0] as int;
+    try {
+      final Object? result;
+      switch (request[1] as String) {
+        case 'open':
+          final device = _workerOpen(library ??= _Libusb.open());
+          if (device == null) {
+            result = null;
+          } else {
+            final handle = nextHandle++;
+            devices[handle] = device;
+            result = [handle, device.pid];
+          }
+        case 'xfer':
+          final device = devices[request[2] as int];
+          if (device == null) throw SwdException('libusb device closed');
+          result = device.xfer(
+            request[3] as Uint8List,
+            request[4] as Uint8List?,
+            request[5] as int,
+          );
+        case 'close':
+          devices.remove(request[2] as int)?.close();
+          result = null;
+        default:
+          throw StateError('unknown USB worker request ${request[1]}');
+      }
+      toMain.send([id, null, result]);
+    } catch (error) {
+      toMain.send([id, '$error', null]);
+    }
+  });
+}
+
+/// Main-isolate side of the USB worker: spawned once, lives for the app.
+///
+/// Desktop swdart used to call libusb directly on the UI isolate. A bulk
+/// transfer can block for up to [_timeout] and a device open enumerates USB,
+/// so a Power-race that kept missing starved the UI and Cancel was never
+/// processed until a catch. Here every call is a message, so each `await`
+/// really yields to the event loop.
+class _UsbWorker {
+  _UsbWorker._(this._toWorker);
+
+  final SendPort _toWorker;
+  final _pending = <int, Completer<Object?>>{};
+  var _nextId = 0;
+
+  static Future<_UsbWorker>? _instance;
+
+  static Future<_UsbWorker> get instance => _instance ??= _spawn();
+
+  static Future<_UsbWorker> _spawn() async {
+    final replies = ReceivePort();
+    final ready = Completer<SendPort>();
+    late final _UsbWorker worker;
+    replies.listen((message) {
+      if (!ready.isCompleted) {
+        ready.complete(message as SendPort);
+        return;
+      }
+      final reply = message as List<Object?>;
+      final completer = worker._pending.remove(reply[0] as int);
+      if (completer == null) return;
+      final error = reply[1] as String?;
+      if (error != null) {
+        completer.completeError(SwdException(error));
+      } else {
+        completer.complete(reply[2]);
+      }
+    });
+    try {
+      await Isolate.spawn(
+        _workerMain,
+        replies.sendPort,
+        debugName: 'x3utils-usb',
+      );
+    } catch (_) {
+      replies.close();
+      _instance = null;
+      rethrow;
+    }
+    worker = _UsbWorker._(await ready.future);
+    return worker;
+  }
+
+  Future<Object?> call(String op, [List<Object?> args = const []]) {
+    final id = _nextId++;
+    final completer = Completer<Object?>();
+    _pending[id] = completer;
+    _toWorker.send([id, op, ...args]);
+    return completer.future;
+  }
+}
+
+class _NativeUsbTransport implements UsbTransport {
+  _NativeUsbTransport(this._worker, this._handle, this._pid);
+
+  final _UsbWorker _worker;
+  final int _handle;
+  final int _pid;
+
+  @override
+  int get productId => _pid;
+
+  @override
+  String get productName =>
+      isV3 ? 'STLINK-V3' : (_pid == 0x3748 ? 'ST-Link/V2' : 'ST-Link/V2-1');
+
+  @override
+  bool get isV3 => v3Pids.contains(_pid);
+
+  @override
+  Future<Uint8List> xfer(
+    List<int> command, {
+    int rxLen = 0,
+    Uint8List? data,
+  }) async {
+    final packet = Uint8List(16)..setRange(0, command.length, command);
+    final result = await _worker.call('xfer', [_handle, packet, data, rxLen]);
+    return result as Uint8List;
+  }
+
+  @override
+  Future<void> close() => _worker.call('close', [_handle]);
+}
+
+Future<UsbTransport?> _open() async {
+  final worker = await _UsbWorker.instance;
+  final opened = await worker.call('open') as List<Object?>?;
+  if (opened == null) return null;
+  return _NativeUsbTransport(worker, opened[0] as int, opened[1] as int);
 }
 
 UsbDeviceStatus get initialStlinkStatus =>

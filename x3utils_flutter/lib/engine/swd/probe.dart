@@ -199,8 +199,9 @@ class Probe {
         // ST-Link/libusb session. Re-entering SWD in a stale session can spin
         // forever after the target firmware removes the debug port.
         await _closeRaceAttempt();
-        // A fresh native USB open naturally yields; keep injected/WebUSB-fast
-        // attempts cancellable too without adding an inter-attempt delay.
+        // Desktop libusb runs in a worker isolate, so its calls already yield;
+        // keep injected/WebUSB-fast attempts cancellable too without adding
+        // an inter-attempt delay.
         await sleep(0);
       }
     }
