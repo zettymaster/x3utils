@@ -7,6 +7,7 @@
 
 - **[GUI v2.1.9](https://github.com/ztakis/x3utils/releases/tag/gui-v2.1.9)** — latest build for Windows, Linux and macOS plus arm64 Android APK.
 - **[CLI v1.8.2](https://github.com/ztakis/x3utils/releases/tag/v1.8.2)** — terminal scripts for Windows, Linux and macOS.
+- **[x3tools](https://github.com/ztakis/x3tools)** — pre-releases & other tools.
 
 ### Web App
 
