@@ -32,6 +32,8 @@ detect_radio() {
         echo "B"
     elif grep -q 'at32f415xx_nrst\.cfg' "$SCRIPT_DIR/config.sh"; then
         echo "C"
+    elif grep -q 'cmsis-dap\.cfg' "$SCRIPT_DIR/config.sh"; then
+        echo "E"
     else
         echo "A"
     fi
@@ -49,6 +51,7 @@ set_radio() {
         B) new_cfg="at32f415xx_c45.cfg" ;;
         C) new_cfg="at32f415xx_nrst.cfg" ;;
         D) new_cfg="at32f415xx.cfg" ;;
+        E) new_cfg="cmsis-dap.cfg" ;;
     esac
     if [[ "$new_radio" == "D" ]]; then
         race_val="true"
@@ -163,6 +166,11 @@ while true; do
     else
         echo "  [ ] D - Power-race / no reset line"
     fi
+    if [[ "$current_radio" == "E" ]]; then
+        echo -e "  [${CL_G}X${CL_NC}] E - C45 / CMSIS-DAP or Rpi Picoprobe"
+    else
+        echo "  [ ] E - C45 / CMSIS-DAP or Rpi Picoprobe"
+    fi
     echo
 
     if [[ "$current_radio" == "B" ]]; then
@@ -179,6 +187,7 @@ while true; do
         b|B) set_radio B ;;
         c|C) set_radio C ;;
         d|D) set_radio D ;;
+        e|E) set_radio E ;;
 
         t|T)
             if [[ "$current_radio" != "B" ]]; then
@@ -377,7 +386,7 @@ while true; do
         *)
             echo
             echo -e "[${CL_R}FAIL${CL_NC}] Invalid selection."
-            echo "       Please choose 1-7, A-D$(  [[ "$current_radio" == "B" ]] && echo ", or T")."
+            echo "       Please choose 1-7, A-E$(  [[ "$current_radio" == "B" ]] && echo ", or T")."
             sleep 1
             ;;
 
